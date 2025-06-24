@@ -1,0 +1,1 @@
+from fireredasr_llm.collections.speechllm.recipes.pipeline import speech_to_text_llm_train, speech_to_text_llm_validate

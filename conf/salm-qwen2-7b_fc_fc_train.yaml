@@ -1,0 +1,214 @@
+name: megatron_audio_gpt_peft
+
+
+############ Data ############
+data:
+  common:
+    global_batch_size: 1
+    micro_batch_size: 1
+    max_seq_length: 4096
+    min_seq_length: 1
+    sample_rate: 16000
+    tokens_to_generate: 128
+
+  train_ds:
+    cuts_path: export/asr/mandarin/aishell-1/asr/train/lhotse/aishell-1_train_cuts10.jsonl
+    max_seq_length: ${data.common.max_seq_length}
+    min_seq_length: ${data.common.min_seq_length}
+    tokens_to_generate: ${data.common.tokens_to_generate} # 0 for no tokens to generate
+
+    use_lhotse: true
+    force_finite: false
+
+    global_batch_size: ${data.common.global_batch_size}
+    micro_batch_size: ${data.common.micro_batch_size}
+    num_workers: 8
+
+    shuffle: True
+    drop_last: false
+    shuffle_buffer_size: 200000
+
+    # # USE BUCKET SAMPLER
+    # use_bucketing: true
+    # num_cuts_for_bins_estimate: 100000
+    # bucket_buffer_size: 100000
+
+    # ## constraint1
+    # max_duration: 600
+    # ## constraint2
+    # bucket_duration_bins: null #
+    # bucket_batch_size:
+    # bucketing_2d_strict_mode: false #
+    # max_tps:
+
+    # USE CUT SAMPLER
+    use_bucketing: false
+    ## constraint
+    batch_size: ${data.common.micro_batch_size}
+    batch_duration: 1200
+
+    # ASR configs
+    sample_rate: ${data.common.sample_rate}
+
+    log_every_n_steps: 10
+    metric:
+      name: "loss" # Name of the evaluation metric to use. Options: ['exact_string_match', 'loss', 'wer', 'bleu', 'rouge']
+      average: null # Average the metric over the dataset. Options: ['macro', 'micro']. Works only for 'F1', 'accuracy' etc. Refer to torchmetrics for metrics where this is supported.
+      num_classes: null
+
+
+  validation_ds:
+    # data source parts
+    cuts_path:
+      - export/asr/mandarin/aishell-1/asr/dev/lhotse/aishell-1_dev_cuts10.jsonl
+    max_seq_length: ${data.common.max_seq_length}
+    min_seq_length: ${data.common.min_seq_length}
+    tokens_to_generate: ${data.common.tokens_to_generate}
+
+    use_lhotse: true
+    force_finite: true
+
+    global_batch_size: ${data.common.global_batch_size}
+    micro_batch_size: ${data.common.micro_batch_size}
+    num_workers: 8
+
+    shuffle: false
+    drop_last: false
+
+    use_bucketing: false
+    ## constraint
+    batch_size: ${data.common.micro_batch_size}
+    batch_duration: 1200
+
+    # ASR configs
+    sample_rate: ${data.common.sample_rate}
+
+    log_every_n_steps: 10
+    metric:
+      name: "loss" # Name of the evaluation metric to use. Options: ['exact_string_match', 'loss', 'wer', 'bleu', 'rouge']
+      average: null # Average the metric over the dataset. Options: ['macro', 'micro']. Works only for 'F1', 'accuracy' etc. Refer to torchmetrics for metrics where this is supported.
+      num_classes: null
+
+############ Model ############
+model:
+  freeze_language_model: true
+  freeze_speech_model: false
+  freeze_modality_adapter: false
+
+  llm:
+    pretrained_model: /hpc_stor01/home/jiaqi.guo/tools/github/NeMo/converted_models/merged_hf_model
+    _target_: nemo.collections.llm.Qwen2Model
+    config:
+      _target_: nemo.collections.llm.Qwen25Config7B
+
+  speech_encoder:
+    _target_: fireredasr_llm.collections.speechllm.modules.encoder.FireRedConformerEncoder
+    init_from_ptl_ckpt: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/model.pth.tar
+    config:
+      idim: 80
+      n_layers: 16
+      n_head: 20
+      d_model: 1280
+      residual_dropout: 0.1
+      dropout_rate: 0.1
+      kernel_size: 33
+      pe_maxlen: 5000
+
+    sample_rate: ${data.common.sample_rate}
+    preprocessor_config:
+      _target_: fireredasr_llm.collections.speechllm.modules.preprocessor.FireRedPreprocessor
+      kaldi_cmvn_file: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/cmvn.ark
+
+  modality_adapter:
+    _target_: fireredasr_llm.collections.speechllm.modules.adapter.Adapter
+    init_from_ptl_ckpt: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/model.pth.tar
+    config:
+      encoder_dim: 1280
+      llm_dim: 3584
+      downsample_rate: 2
+
+
+############ Optimizer ############
+optim:
+  _target_: nemo.lightning.MegatronOptimizerModule
+  config:
+    _target_: megatron.core.optimizer.OptimizerConfig
+    optimizer: adam
+    lr: 1e-4
+    clip_grad: 1.0
+    weight_decay: 0.0001
+    optimizer_cpu_offload: false
+    overlap_cpu_optimizer_d2h_h2d: false
+
+  lr_scheduler:
+    _target_: nemo.lightning.pytorch.optim.CosineAnnealingScheduler
+    max_steps: ${trainer.max_steps}
+    warmup_steps: 250
+    constant_steps: 10000
+    min_lr: 5e-5
+
+############ Trainer ############
+
+# Set this to "DD:HH:MM:SS" format to limit the max time for this job
+# If `max_time_per_run` is set, `strategy.ckpt_async_save` must be set to false
+max_time_per_run: null
+
+trainer:
+  # _target_: nemo.lightning.Trainer
+  devices: 0,1,2,3
+  accelerator: gpu
+  num_nodes: 1
+  max_epochs: 1
+  max_steps: 10 # 1M steps
+  accumulate_grad_batches: 1
+  log_every_n_steps: 1 # frequency with which training steps are logged
+  val_check_interval: 1 # If is an int n > 1, will run val every n training steps, if a float 0.0 - 1.0 will run val every epoch fraction, e.g. 0.25 will run val every quarter epoch
+  num_sanity_val_steps: 0
+  sync_batchnorm: true # used for convolution modules like FC
+  use_distributed_sampler: false # explicitly set to false for Lhotse compatibility
+
+strategy:
+  _target_: nemo.collections.speechlm.strategies.SpeechLMMegatronStrategy
+  tensor_model_parallel_size: 4
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  ckpt_async_save: true
+
+callbacks:
+  checkpoint:
+    _target_: nemo.lightning.pytorch.callbacks.ModelCheckpoint
+    filename: '${name}--{${callbacks.checkpoint.monitor}:.5f}-{step}'
+    monitor: "val_loss"
+    mode: "min"
+    save_last: true
+    save_top_k: 1
+    save_weights_only: false
+    always_save_context: true
+
+plugins:
+  _target_: nemo.lightning.MegatronMixedPrecision
+  precision: "bf16-mixed"
+  autocast_enabled: null
+
+############ AutoResume ############
+resume:
+  _target_: nemo.collections.speechlm.utils.resume.SpeechLMAutoResume
+  resume_from_directory: null
+  resume_from_path: null
+  adapter_path: null
+  resume_if_exists: false
+  resume_past_end: false
+  resume_ignore_no_checkpoint: true
+
+
+############ Logging ############
+logger:
+  _target_: nemo.lightning.NeMoLogger
+  log_dir: null  # default to ./nemo_experiments
+  name: ${name}
+  # wandb:
+  #   _target_: lightning.pytorch.loggers.WandbLogger
+  #   project: null
+  #   name: ${logger.name}
+  #   resume: false
+

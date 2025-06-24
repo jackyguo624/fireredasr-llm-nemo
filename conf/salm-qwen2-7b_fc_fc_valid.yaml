@@ -1,0 +1,186 @@
+name: megatron_audio_gpt_peft
+
+############ Data ############
+data:
+  common:
+    global_batch_size: 1
+    micro_batch_size: 1
+    max_seq_length: 4096
+    min_seq_length: 1
+    sample_rate: 16000
+    end_string: null  # additional end string other than <EOS>
+    context_key: 'context'  # what key in manifest to load for context
+    answer_key: 'answer'  # what key in manifest to load for answer
+    prompt_format: 'llama3'  # prompt formatter to use, set according to the chosen LLM and check for support in nemo/collections/common/prompts
+    tokens_to_generate: 128
+    add_boa_eoa: false  # whether to add <boa> and <eoa> strings before and after audio features
+
+    # below params are only used for non-lhotse dataloader, which are now DEPRECATED
+    audio_locator: null  # audio locator string in the context text for locating audios
+    prompt_template: "Q: {context}\nA: {answer}" # fstring to use for assistant prompt.
+    separate_prompt_and_response_with_newline: False
+    truncation_field: 'context'
+    add_eos: true
+    add_sep: false
+    add_bos: false
+
+  validation_ds:
+    # data source parts
+    cuts_path: 
+      # - z_dummy_testset/librispeech/cuts1.jsonl
+      - export/asr/mandarin/aishell-1/asr/test/lhotse/aishell-1_test_cuts1.debug2.jsonl
+
+    max_seq_length: ${data.common.max_seq_length}
+    min_seq_length: ${data.common.min_seq_length}
+    tokens_to_generate: ${data.common.tokens_to_generate}
+
+
+    use_lhotse: true
+
+    batch_size: 1
+
+    force_finite: true        # 移除此参数，避免在分布式训练中导致deadlock
+    use_bucketing: false      # 禁用bucketing
+    drop_last: false          # 不丢弃数据
+    shuffle: false            # 禁用shuffle
+
+    global_batch_size: ${data.common.global_batch_size}
+    micro_batch_size: ${data.common.micro_batch_size}
+    num_workers: 1
+    pin_memory: True
+    output_file_path_prefix: null # Prefix of the file to write predictions to.
+    index_mapping_dir: null # Path to a directory to write index mapping files.
+    write_predictions_to_file: true
+
+    # ASR configs
+    sample_rate: ${data.common.sample_rate}
+    audio_locator: ${data.common.audio_locator}
+
+    log_every_n_steps: 10
+    metric:
+      name: "wer" # Name of the evaluation metric to use. Options: ['exact_string_match', 'loss', 'wer', 'bleu', 'rouge']
+      average: null # Average the metric over the dataset. Options: ['macro', 'micro']. Works only for 'F1', 'accuracy' etc. Refer to torchmetrics for metrics where this is supported.
+      num_classes: null
+
+
+############ Model ############
+model:
+  freeze_language_model: true
+  freeze_speech_model: false
+  freeze_modality_adapter: false
+
+  llm:
+    pretrained_model: /hpc_stor01/home/jiaqi.guo/tools/github/NeMo/converted_models/merged_hf_model
+    _target_: nemo.collections.llm.Qwen2Model
+    config:
+      _target_: nemo.collections.llm.Qwen25Config7B
+
+  speech_encoder:
+    _target_: fireredasr_llm.collections.speechllm.modules.encoder.FireRedConformerEncoder
+    init_from_ptl_ckpt: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/model.pth.tar
+    config:
+      idim: 80
+      n_layers: 16
+      n_head: 20
+      d_model: 1280
+      residual_dropout: 0.1
+      dropout_rate: 0.1
+      kernel_size: 33
+      pe_maxlen: 5000
+
+    sample_rate: ${data.common.sample_rate}
+    preprocessor_config:
+      _target_: fireredasr_llm.collections.speechllm.modules.preprocessor.FireRedPreprocessor
+      kaldi_cmvn_file: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/cmvn.ark
+
+  modality_adapter:
+    _target_: fireredasr_llm.collections.speechllm.modules.adapter.Adapter
+    init_from_ptl_ckpt: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/model.pth.tar
+    config:
+      encoder_dim: 1280
+      llm_dim: 3584
+      downsample_rate: 2
+
+
+############ Optimizer ############
+optim:
+  _target_: nemo.lightning.MegatronOptimizerModule
+  config:
+    _target_: megatron.core.optimizer.OptimizerConfig
+    optimizer: adam
+    lr: 1e-4
+    clip_grad: 1.0
+    weight_decay: 0.0001
+  lr_scheduler:
+    _target_: nemo.lightning.pytorch.optim.CosineAnnealingScheduler
+    max_steps: ${trainer.max_steps}
+    warmup_steps: 250
+    constant_steps: 10000
+    min_lr: 5e-5
+
+############ Trainer ############
+
+# Set this to "DD:HH:MM:SS" format to limit the max time for this job
+# If `max_time_per_run` is set, `strategy.ckpt_async_save` must be set to false
+max_time_per_run: null
+
+trainer:
+  # _target_: nemo.lightning.Trainer
+  devices: 0, 1
+  accelerator: gpu
+  num_nodes: 1
+  max_epochs: -1
+  max_steps: 1000000 # 1M steps
+  accumulate_grad_batches: 1
+  log_every_n_steps: 10 # frequency with which training steps are logged
+  val_check_interval: 2000 # If is an int n > 1, will run val every n training steps, if a float 0.0 - 1.0 will run val every epoch fraction, e.g. 0.25 will run val every quarter epoch
+  # limit_val_batches: 10  # 限制验证批次数量，防止无限验证循环
+  num_sanity_val_steps: 0
+  sync_batchnorm: true # used for convolution modules like FC
+  use_distributed_sampler: false # required for lhotse - Lhotse has its own handling of distributed sampling
+
+strategy:
+  _target_: nemo.collections.speechlm.strategies.SpeechLMMegatronStrategy
+  tensor_model_parallel_size: 2
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  ckpt_async_save: true
+
+callbacks:
+  checkpoint:
+    _target_: nemo.lightning.pytorch.callbacks.ModelCheckpoint
+    filename: '${name}--{${callbacks.checkpoint.monitor}:.5f}-{step}'
+    monitor: "val_loss"
+    mode: "min"
+    save_last: true
+    save_top_k: 1
+    save_weights_only: false
+    always_save_context: true
+
+plugins:
+  _target_: nemo.lightning.MegatronMixedPrecision
+  precision: "bf16-mixed"
+  autocast_enabled: null
+
+############ AutoResume ############
+resume:
+  _target_: nemo.collections.speechlm.utils.resume.SpeechLMAutoResume
+  resume_from_directory: null
+  resume_from_path: null
+  adapter_path: null
+  resume_if_exists: true
+  resume_past_end: false
+  resume_ignore_no_checkpoint: true
+
+
+############ Logging ############
+logger:
+  _target_: nemo.lightning.NeMoLogger
+  log_dir: null  # default to ./nemo_experiments
+  name: ${name}
+  # wandb:
+  #   _target_: lightning.pytorch.loggers.WandbLogger
+  #   project: null
+  #   name: ${logger.name}
+  #   resume: false
+
