@@ -75,7 +75,6 @@ class MultimodalConversationDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, all_cuts: CutSet) -> dict[str, Union[torch.Tensor, list[str], dict]]:
 
-        print(f"len of cuts: {len(all_cuts)}")
         # for cut in all_cuts:
         audio_samples = [
             torch.tensor(cut.load_audio().reshape(-1), dtype=torch.int16)

@@ -126,7 +126,7 @@ max_time_per_run: null
 
 trainer:
   # _target_: nemo.lightning.Trainer
-  devices: 0, 1
+  devices: 0, 1, 2, 3
   accelerator: gpu
   num_nodes: 1
   max_epochs: -1
@@ -141,7 +141,7 @@ trainer:
 
 strategy:
   _target_: nemo.collections.speechlm.strategies.SpeechLMMegatronStrategy
-  tensor_model_parallel_size: 2
+  tensor_model_parallel_size: 4
   pipeline_model_parallel_size: 1
   context_parallel_size: 1
   ckpt_async_save: true

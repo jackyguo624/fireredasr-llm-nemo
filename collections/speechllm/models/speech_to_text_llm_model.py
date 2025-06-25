@@ -471,7 +471,7 @@ class MCoreSpeechToTextLLM(MegatronModule, fn.FNMixin):
         )  # (N,U)
         nb_speech_pad = max_embed_dim - 1 - new_token_positions[:, -1]
         if left_padding:
-            new_token_positions += nb_speech_pad[:, None]  # offset for left padding
+            new_token_positions = new_token_positions + nb_speech_pad[:, None]  # offset for left padding
         text_to_overwrite = new_token_positions[batch_indices, non_speech_indices]
 
 
@@ -533,9 +533,9 @@ class MCoreSpeechToTextLLM(MegatronModule, fn.FNMixin):
 
         speech_pad_position = speech_to_overwrite.cumsum(-1) <= speech_lens[:, None]
 
-        speech_to_overwrite &= speech_to_overwrite.cumsum(-1) - 1 >= nb_speech_pad[
+        speech_to_overwrite = speech_to_overwrite & (speech_to_overwrite.cumsum(-1) - 1 >= nb_speech_pad[
             :, None
-        ].to(target_device)
+        ].to(target_device))
 
         if speech_to_overwrite.sum() != speech_features.shape[:-1].numel():
             raise ValueError(
@@ -547,7 +547,7 @@ class MCoreSpeechToTextLLM(MegatronModule, fn.FNMixin):
             speech_features.contiguous().reshape(-1, embed_dim).to(target_device)
         )
 
-        speech_to_overwrite &= speech_pad_position
+        speech_to_overwrite = speech_to_overwrite & speech_pad_position
 
         final_embedding_length = input_length + speech_lens
 
