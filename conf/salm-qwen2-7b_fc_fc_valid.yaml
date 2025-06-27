@@ -3,7 +3,7 @@ name: megatron_audio_gpt_peft
 ############ Data ############
 data:
   common:
-    global_batch_size: 1
+    global_batch_size: 8
     micro_batch_size: 1
     max_seq_length: 4096
     min_seq_length: 1
@@ -28,7 +28,7 @@ data:
     # data source parts
     cuts_path: 
       # - z_dummy_testset/librispeech/cuts1.jsonl
-      - export/asr/mandarin/aishell-1/asr/test/lhotse/aishell-1_test_cuts1.debug2.jsonl
+      - export/asr/mandarin/aishell-1/asr/test/lhotse/aishell-1_test_cuts.jsonl
 
     max_seq_length: ${data.common.max_seq_length}
     min_seq_length: ${data.common.min_seq_length}
@@ -47,7 +47,7 @@ data:
     global_batch_size: ${data.common.global_batch_size}
     micro_batch_size: ${data.common.micro_batch_size}
     num_workers: 1
-    pin_memory: True
+    # pin_memory: True
     output_file_path_prefix: null # Prefix of the file to write predictions to.
     index_mapping_dir: null # Path to a directory to write index mapping files.
     write_predictions_to_file: true
@@ -66,14 +66,17 @@ data:
 ############ Model ############
 model:
   freeze_language_model: true
-  freeze_speech_model: false
-  freeze_modality_adapter: false
+  freeze_speech_model: true
+  freeze_modality_adapter: true
 
   llm:
     pretrained_model: /hpc_stor01/home/jiaqi.guo/tools/github/NeMo/converted_models/merged_hf_model
     _target_: nemo.collections.llm.Qwen2Model
     config:
       _target_: nemo.collections.llm.Qwen25Config7B
+      use_cpu_initialization: true
+      bf16: true
+
 
   speech_encoder:
     _target_: fireredasr_llm.collections.speechllm.modules.encoder.FireRedConformerEncoder
@@ -126,7 +129,7 @@ max_time_per_run: null
 
 trainer:
   # _target_: nemo.lightning.Trainer
-  devices: 0, 1, 2, 3
+  devices: 8 # 4,5,6,7
   accelerator: gpu
   num_nodes: 1
   max_epochs: -1
@@ -141,7 +144,7 @@ trainer:
 
 strategy:
   _target_: nemo.collections.speechlm.strategies.SpeechLMMegatronStrategy
-  tensor_model_parallel_size: 4
+  tensor_model_parallel_size: 1
   pipeline_model_parallel_size: 1
   context_parallel_size: 1
   ckpt_async_save: true

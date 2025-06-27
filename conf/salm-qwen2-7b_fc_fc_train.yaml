@@ -4,7 +4,7 @@ name: megatron_audio_gpt_firered_peft
 ############ Data ############
 data:
   common:
-    global_batch_size: 2
+    global_batch_size: 8
     micro_batch_size: 1 # 每个GPU处理1个样本
     max_seq_length: 4096
     min_seq_length: 1
@@ -99,6 +99,8 @@ model:
     _target_: nemo.collections.llm.Qwen2Model
     config:
       _target_: nemo.collections.llm.Qwen25Config7B
+      use_cpu_initialization: true
+      bf16: true
 
   speech_encoder:
     _target_: fireredasr_llm.collections.speechllm.modules.encoder.FireRedConformerEncoder
@@ -136,8 +138,8 @@ optim:
     lr: 1e-4
     clip_grad: 1.0
     weight_decay: 0.0001
-    # optimizer_cpu_offload: false
-    # overlap_cpu_optimizer_d2h_h2d: false
+    # optimizer_cpu_offload: true
+    # overlap_cpu_optimizer_d2h_h2d: true
 
   lr_scheduler:
     _target_: nemo.lightning.pytorch.optim.CosineAnnealingScheduler
@@ -154,11 +156,11 @@ max_time_per_run: null
 
 trainer:
   # _target_: nemo.lightning.Trainer
-  devices: 0,1,2,3,4,5,6,7
+  devices: 8
   accelerator: gpu
   num_nodes: 1
   max_epochs: 1
-  max_steps: -1 # 1000000 # 1M steps
+  max_steps: 1000000 # 1M steps
   accumulate_grad_batches: 1
   log_every_n_steps: 10 # frequency with which training steps are logged
   val_check_interval: 1.0 # If is an int n > 1, will run val every n training steps, if a float 0.0 - 1.0 will run val every epoch fraction, e.g. 0.25 will run val every quarter epoch
@@ -167,11 +169,12 @@ trainer:
 
 strategy:
   _target_: nemo.collections.speechlm.strategies.SpeechLMMegatronStrategy
-  tensor_model_parallel_size: 4
+  tensor_model_parallel_size: 1
   pipeline_model_parallel_size: 1
   context_parallel_size: 1
   sequence_parallel: false  # 禁用序列并行避免all_to_all通信死锁
   ckpt_async_save: true
+  find_unused_parameters: true
 
 callbacks:
   checkpoint:

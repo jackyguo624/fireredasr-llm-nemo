@@ -348,6 +348,7 @@ class SpeechToTextLLMConfig(TransformerConfig, io.IOMixin):
         self, tokenizer: TokenizerSpec, speech_model: Optional[ASRModel] = None
     ) -> "MCoreSpeechToTextLLM":
         self._propagate_model_configs()
+        self.language_model_config.params_dtype = torch.bfloat16 # prevent oom in cpu init
         language_model = self.language_model_config.configure_model(tokenizer=tokenizer)  # type: "MCoreGPTModel"
         language_model = self._maybe_load_pretrained_llm(language_model)
 
@@ -733,11 +734,10 @@ class SpeechToTextLLM(SpeechLanguageModel):
     def configure_model(self) -> None:
         if not hasattr(self, "module"):
             self.module = self.config.configure_model(self.tokenizer, self._speech_model)  # type: MCoreSpeechToTextLLM
+            del self._speech_model
             self.module.language_model = self.module.language_model.to(self.device)
             self.module.speech_model = self.module.speech_model.to(self.device)
             self.module.modality_adapter = self.module.modality_adapter.to(self.device)
-            del self._speech_model
-            torch.cuda.empty_cache()
 
 
     def setup(self, stage: str):
