@@ -81,7 +81,10 @@ def build_components(cfg: DictConfig, tokenizer: Optional[AutoTokenizer] = None)
     data = AudioToTextDataModule(cfg['data'], tokenizer=tokenizer)
 
     # 3. setup the optimizer
-    optim = Serialization.from_config_dict(cfg['optim'])
+    if cfg.get('optim', None):
+        optim = Serialization.from_config_dict(cfg['optim'])
+    else:
+        optim = None
 
     # 4. setup trainer
     callbacks = get_object_list_from_config(cfg['callbacks'])

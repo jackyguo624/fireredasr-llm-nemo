@@ -363,6 +363,8 @@ class SpeechToTextLLMConfig(TransformerConfig, io.IOMixin):
         modality_adapter.set_input_tensor = MethodType(set_input_tensor, modality_adapter)
 
         speech_model, modality_adapter = self._maybe_load_asr_and_modality_adapter(speech_model, modality_adapter)
+        speech_model = speech_model.bfloat16()
+        modality_adapter = modality_adapter.bfloat16()
         model = MCoreSpeechToTextLLM(
             config=self,
             language_model=language_model,
@@ -669,7 +671,6 @@ class MCoreSpeechToTextLLM(MegatronModule, fn.FNMixin):
         inference_params: Optional[InferenceParams] = None,
         packed_seq_params: Optional[Dict[str, Any]] = None,
     ):
-
         encoded, encoded_len = self.perception(
             input_signal=audio_signal,
             input_signal_length=audio_signal_length,
@@ -735,10 +736,13 @@ class SpeechToTextLLM(SpeechLanguageModel):
         if not hasattr(self, "module"):
             self.module = self.config.configure_model(self.tokenizer, self._speech_model)  # type: MCoreSpeechToTextLLM
             del self._speech_model
-            self.module.language_model = self.module.language_model.to(self.device)
-            self.module.speech_model = self.module.speech_model.to(self.device)
-            self.module.modality_adapter = self.module.modality_adapter.to(self.device)
-
+            def calculate_params(module):
+                num_params = sum(p.numel() for p in module.parameters())
+                params_size = sum(p.numel() * p.element_size() for p in module.parameters())
+                return num_params / (1024 ** 2), params_size / (1024 ** 2)
+            print("modality_adapter", calculate_params(self.module.modality_adapter))
+            print("speech_model", calculate_params(self.module.speech_model))
+            print("language_model", calculate_params(self.module.language_model))
 
     def setup(self, stage: str):
         super().setup(stage)

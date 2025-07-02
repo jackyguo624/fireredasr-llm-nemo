@@ -110,7 +110,7 @@ class ASRModuleConfig(ModelParallelConfig, io.IOMixin):
         if self.init_from_ptl_ckpt:
             state_dict = torch.load(self.init_from_ptl_ckpt,weights_only=False)["model_state_dict"]
             state_dict = {k.replace('encoder.',''): v for k, v in state_dict.items() if k.startswith('encoder.')}
-            model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict, strict=False)
 
         preprocessor = Serialization.from_config_dict(to_dict_config(self.preprocessor_config))
 

@@ -39,6 +39,7 @@ python speech_to_text_llm_train.py \
     data.common.micro_batch_size=$MICRO_BATCH \
     ++model.resume_from_path=<path to model checkpoint>
 """
+
 import sys
 sys.path.append("/hpc_stor01/home/jiaqi.guo/tools/github/NeMo/sequential")
 
@@ -55,6 +56,8 @@ from nemo.core.config import hydra_runner
 @hydra_runner(config_path="./conf", config_name="salm-qwen2-7b_fc_fc_train")
 def main(cfg):
     """main function for running validation."""
+    if cfg.debug:
+        breakpoint()
     return speech_to_text_llm_train(cfg)
 
 

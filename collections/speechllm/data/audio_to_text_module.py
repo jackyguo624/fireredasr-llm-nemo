@@ -109,7 +109,7 @@ class AudioToTextDataModule(pl.LightningDataModule, IOMixin):
             micro_batch_size=self.micro_batch_size,
             global_batch_size=self.global_batch_size,
             rampup_batch_size=self.data_cfg.get("rampup_batch_size", None),
-            dataloader_type="batch",  # "batch" should be used for SFT,
+            # dataloader_type="batch",  # "batch" should be used for SFT,
         )
 
         # Follows the calculation in `nemo.collections.nlp.data.language_modeling.megatron.
