@@ -70,6 +70,7 @@ def build_components(cfg: DictConfig, tokenizer: Optional[AutoTokenizer] = None)
         data_config=cfg['data']['common'],
         resume_speech_model_from_path=cfg['model'].get('resume_speech_model_from_path', None),
         resume_modality_adapter_from_path=cfg['model'].get('resume_modality_adapter_from_path', None),
+        inference_config=cfg['model']['inference_config'],
     )
 
     if model_config.language_model_from_pretrained:

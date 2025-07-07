@@ -370,9 +370,9 @@ class SpeechToTextGenerationStrategy(TextGenerationStrategy):
         else:
             tokens2use = tokens[:, curr_context_length - 1].view(micro_batch_size, -1).contiguous()
             positions2use = self.position_ids[:, curr_context_length - 1].view(micro_batch_size, -1).contiguous()
-            embeddings2use = self.model._get_text_embeddings(tokens2use, positions2use).contiguous()
+            embeddings2use = self.model._get_text_embeddings(tokens2use, positions2use).transpose(0, 1).contiguous() # [max_len, B*N, hidden_size]
             started = context_lengths <= curr_context_length
-            # embeddings2use = switch(input_embeddings[curr_context_length - 2].unsqueeze(0), embeddings2use, started)
+            embeddings2use = switch(input_embeddings[curr_context_length - 1].unsqueeze(0), embeddings2use, started) # [max_len, B*N, hidden_size]
             embeddings2use = embeddings2use.contiguous()
 
         # Select attention_mask based on embeddings2use length

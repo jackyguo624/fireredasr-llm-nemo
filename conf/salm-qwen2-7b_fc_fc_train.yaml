@@ -4,7 +4,7 @@ name: megatron_audio_gpt_firered_peft
 ############ Data ############
 data:
   common:
-    global_batch_size: 48
+    global_batch_size: 96
     micro_batch_size: 1
     max_seq_length: 4096
     min_seq_length: 1
@@ -93,7 +93,7 @@ data:
 ############ Model ############
 model:
   freeze_language_model: true
-  freeze_speech_model: true
+  freeze_speech_model: false
   freeze_modality_adapter: false
 
   llm:

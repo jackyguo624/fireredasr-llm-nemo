@@ -98,12 +98,13 @@ def synced_generate(
     min_tokens_to_generate=0,
     num_audios: Optional[torch.Tensor] = None,
     context_start_idx: Optional[List[List[int]]] = None,
+    beam_size=None,
 ):
     context_length = context_length_tensor.min().item()
     tokenizer = model.tokenizer
     if isinstance(tokenizer, TabularTokenizer):
         raise NotImplementedError("Tabular generation is not supported yet")
-    else:
+    elif beam_size is None:
         batch_token_iterator = sample_sequence_batch(
             model,
             inference_strategy,
@@ -126,6 +127,28 @@ def synced_generate(
             },
             num_audios=num_audios,
             context_start_idx=context_start_idx,
+        )
+    else:
+        batch_token_iterator = sample_sequence_batch_beamsearch(
+            model,
+            inference_strategy,
+            context_tokens_tensor,
+            context_length_tensor,
+            audio_signal,
+            audio_signal_length,
+            tokens_to_generate,
+            all_probs,
+            compute_attention_mask=compute_attention_mask,
+            compute_logprob=compute_logprob,
+            temperature=temperature,
+            end_strings=end_strings,
+            extra={
+                "repetition_penalty": repetition_penalty,
+                "min_tokens_to_generate": min_tokens_to_generate,
+            },
+            num_audios=num_audios,
+            context_start_idx=context_start_idx,
+            beam_size=beam_size
         )
 
     for tokens, lengths, output_logits, full_logits, audio_feat_lens in batch_token_iterator:
@@ -192,6 +215,7 @@ def generate(
     repetition_penalty=1.0,
     end_strings=['<|endoftext|>'],
     min_tokens_to_generate=0,
+    beam_size=None,
     **strategy_args,
 ) -> OutputType:
     """
@@ -254,6 +278,7 @@ def generate(
         min_tokens_to_generate=min_tokens_to_generate,
         num_audios=num_audios,
         context_start_idx=context_start_idx,
+        beam_size=beam_size,
     )
     special_tokens = set()
     if hasattr(tokenizer, 'pad_token') and tokenizer.pad_token is not None:
@@ -366,7 +391,7 @@ def sample_sequence_batch(
         #     from fireredasr_llm.collections.speechllm.models.speech_to_text_llm_model import dump_tensor_to_file
         #     dump_tensor_to_file(context_tokens, "context_tokens_decode", batch=None)
         #     dump_tensor_to_file(input_embeddings, "input_embeddings_decode ", batch=None)
-        
+
         audio_text_context_lengths = context_lengths + audio_feat_lens
         context_length = audio_text_context_lengths.min().item()
         # added eos_id to support the function generate_samples_eval that passes
@@ -452,6 +477,9 @@ def sample_sequence_batch(
 
                 # Insert either new predicted or next prompt token
                 tokens[:, context_length] = new_tokens
+                print(f"tokens: {tokens}")
+                print(f"decode tokens: {safe_decode(tokenizer, tokens[0])}")
+                breakpoint()
 
                 if compute_logprob:
                     if output_logits is None:
@@ -520,10 +548,261 @@ def sample_sequence_batch(
             if done:
                 break
 
+
+def sample_sequence_batch_beamsearch(
+    model,
+    inference_strategy,
+    context_tokens,
+    context_lengths,
+    audio_signal,
+    audio_signal_length,
+    tokens_to_generate,
+    all_probs=False,
+    compute_attention_mask=True,
+    compute_logprob=False,
+    type_ids=None,
+    temperature=None,
+    end_strings=['<|endoftext|>'],
+    extra={},
+    num_audios: Optional[torch.Tensor] = None,
+    context_start_idx: Optional[List[List[int]]] = None,
+    beam_size=5,
+):
+    app_state = AppState()
+    micro_batch_size = context_tokens.shape[0]
+    reconfigure_num_microbatches_calculator(
+        rank=app_state.global_rank,
+        rampup_batch_size=None,
+        global_batch_size=micro_batch_size,
+        micro_batch_size=micro_batch_size,
+        data_parallel_size=1,
+    )
+    assert tokens_to_generate > 0, "tokens_to_generate should be > 0"
+    assert (
+        model.cfg.get('sequence_parallel', False) == False
+    ), 'sequence_parallel should be False during inference. Disable it in the model config if restoring from nemo or in hparams.yaml if restoring from PTL checkpoint'
+    assert (
+        model.cfg.get('activations_checkpoint_granularity', None) is None
+    ), 'activations_checkpoint_granularity should be None during inference. Disable it in the model config if restoring from nemo or in hparams.yaml if restoring from PTL checkpoint'
+    assert (
+        model.cfg.get('activations_checkpoint_method', None) is None
+    ), 'activations_checkpoint_method should be None during inference. Disable it in the model config if restoring from nemo or in hparams.yaml if restoring from PTL checkpoint'
+
+    tokenizer = model.tokenizer
+    # initialize the batch
+    with torch.no_grad():
+        context_tokens, input_embeddings, audio_feat_lens = inference_strategy.init_batch(
+            context_tokens,
+            context_lengths,
+            audio_signal,
+            audio_signal_length,
+            compute_attention_mask,
+            num_audios,
+            context_start_idx
+        )
+
+        audio_text_context_lengths = context_lengths + audio_feat_lens
+
+        # added eos_id to support the function generate_samples_eval that passes
+        # eos_id as an argument and needs termination when that id id found.
+        eod_id = tokenizer.eos_token_id
+        counter = 0
+
+        # convert for beam search
+        batch_size = context_tokens.size(0)
+        tokens = context_tokens.unsqueeze(1).repeat(1, beam_size, 1) # [batch_size, beam_size, max_len]
+        input_embeddings = input_embeddings.unsqueeze(1).repeat(1, beam_size, 1, 1) # [max_len, batch_size, beam, hidden_size]
+        context_lengths = context_lengths.unsqueeze(1).repeat(1, beam_size) # [batch_size, beam_size]
+
+        # convert batch_size * beam_size to run_size
+        is_done = torch.zeros([batch_size * beam_size]).byte().cuda()
+        tokens = tokens.view(-1, tokens.size(-1)) # [batch_size * beam_size, max_len]
+        input_embeddings = input_embeddings.view(input_embeddings.size(0), -1, input_embeddings.size(-1)) # [max_len, batch_size * beam_size, hidden_size]
+        context_lengths = context_lengths.view(-1) # [batch_size * beam_size]
+        audio_text_context_lengths = audio_text_context_lengths.unsqueeze(1).repeat(1, beam_size).view(-1) # [batch_size * beam_size]
+        context_length = audio_text_context_lengths.min().item()
+
+        scores = torch.tensor([0.0] + [-float('inf')] * (beam_size - 1), dtype=torch.float).to(tokens.device) # [beam_size]
+        scores = scores.repeat([batch_size]).unsqueeze(1).to(tokens.device) # [batch_size, beam_size]
+
+        output_logits = None
+        all_generated_indices = None  # used to track all generated indices
+        # Generate enough tokens for the longest sequence
+        maxlen = tokens_to_generate + audio_text_context_lengths.max().item()
+        maxlen = inference_strategy.clip_max_len(maxlen)
+        lengths = torch.ones([batch_size * beam_size]).long().cuda() * maxlen
+
+        while context_length < maxlen:
+            batch = inference_strategy.prepare_batch_at_step(
+                tokens,
+                input_embeddings,
+                maxlen,
+                micro_batch_size,
+                counter,
+                audio_text_context_lengths,
+                context_length,
+                compute_attention_mask,
+            )
+
+            output = inference_strategy.forward_step(batch)  # logits output from the model
+
+            if parallel_state.is_pipeline_last_stage():
+                # output: [batch_size * beam_size, max_len, vocab_size]
+                if compute_logprob:
+                    output = tensor_parallel.gather_from_tensor_model_parallel_region(output)
+                    assert output is not None
+                    logits = output[:, -1].view(batch_size * beam_size, -1).contiguous()
+
+                else:
+                    logits = output[:, -1].contiguous()
+                    logits = tensor_parallel.gather_from_tensor_model_parallel_region(logits)
+                    assert logits is not None
+                    logits = logits.view(batch_size * beam_size, -1)
+
+                # started indicates whether the current token step passes the context_length, so we make sure not to overwrite the context tokens
+                started = audio_text_context_lengths <= context_length
+
+                logits = logits.float()
+                logits /= temperature
+                # handle repetition penality
+                logits = text_generation_utils.repetition_penalty(
+                    logits, extra.get('repetition_penalty', 1.2), all_generated_indices
+                )
+
+                log_probs = F.log_softmax(logits, dim=-1) # [batch_size * beam_size, vocab_size]
+                # log_probs = log_probs.nan_to_num(0.0)
+
+                # Here we short for the notation of batch_size(B), beam_size(N), vocab_size(V)
+                # First beam prune: select topk best prob at current time
+                # top_k_index in current step beam_size dimension [0 ~ N]
+                # log_probs = log_probs.view(batch_size, beam_size, -1) # [B, N, V]
+                top_k_logp, top_k_index = log_probs.topk(beam_size, dim=-1) # [B * N, N]
+
+                # Second beam prune: select topk score with history
+                scores = scores + top_k_logp # broadcast add [B * N, N]
+                scores = scores.view(batch_size, beam_size * beam_size)  # (B, N*N)
+                # offset_k_index in current step with history beam_size dimension [0 ~ N*N)
+                scores, offset_k_index = scores.topk(k=beam_size)  # (B, N)
+
+                # Update cache to be consistent with new topk scores / hyps
+                cache_index = (offset_k_index // beam_size).view(-1)  # (B, N) [0 ~ N)
+                base_cache_index = (torch.arange(batch_size, device=tokens.device).view(
+                    -1, 1).repeat([1, beam_size]) * beam_size).view(-1)  # (B*N)
+                cache_index = base_cache_index + cache_index # (B*N)
+                inference_strategy.inference_params.swap_key_value_dict(cache_index)
+                input_embeddings = torch.index_select(input_embeddings, dim=1, index=cache_index) # [max_len, B*N, hidden_size]
+                tokens = torch.index_select(tokens, dim=0, index=cache_index) # [B*N, max_len]
+                context_lengths = torch.index_select(context_lengths, dim=0, index=cache_index) # [B*N]
+                is_done = torch.index_select(is_done, dim=0, index=cache_index) # [B*N]
+                lengths = torch.index_select(lengths, dim=0, index=cache_index) # [B*N]
+                torch.cuda.empty_cache()
+
+
+                scores = scores.view(-1, 1)  # (B*N, 1)
+                # Compute base index in top_k_index,
+                # regard top_k_index as (B*N*N),regard offset_k_index as (B*N),
+                # then find offset_k_index in top_k_index
+                base_k_index = torch.arange(batch_size, device=tokens.device).view(
+                    -1, 1).repeat([1, beam_size])  # (B, N)
+                base_k_index = base_k_index * beam_size * beam_size
+                best_k_index = base_k_index.view(-1) + offset_k_index.view(-1)  # (B*N)
+
+                # Update best hyps
+                best_k_pred = torch.index_select(top_k_index.view(-1), dim=-1, index=best_k_index)  # (B*N)
+                best_k_pred = best_k_pred.view(batch_size, beam_size) # (B, N)
+                prev = best_k_pred.view(-1) # (B*N)
+
+                # Clamp the predicted out of vocabulary tokens
+                # prev = torch.clamp(prev, max=tokenizer.vocab_size - 1)
+                new_tokens = switch(tokens[:, context_length].view(-1), prev, started)
+
+                # Replace sampled tokens w/ done token if EOD has already been sampled
+                new_tokens = switch(new_tokens, eod_id, is_done)
+                # Clamp the predicted out of vocabulary tokens
+                # prev = torch.clamp(prev, max=tokenizer.vocab_size - 1)
+                new_tokens = switch(tokens[:, context_length].view(-1), prev, started)
+
+                # Replace sampled tokens w/ done token if EOD has already been sampled
+                new_tokens = switch(new_tokens, eod_id, is_done)
+
+                # post process the inference tokens based on the strategy
+                inference_strategy.post_process(tokens, new_tokens, context_length)
+
+                # Insert either new predicted or next prompt token
+                tokens[:, context_length] = new_tokens
+
+                if compute_logprob:
+                    if output_logits is None:
+                        output = F.log_softmax(output[:, :context_length, :], 2)
+
+                        indices = torch.unsqueeze(tokens[:, 1 : context_length + 1], 2)
+                        output_logits = torch.gather(output, 2, indices).squeeze(2)
+                        all_generated_indices = indices[:, :, 0]
+                        if all_probs:
+                            full_logits = output
+                    else:
+                        output = F.log_softmax(output, 2)
+                        indices = torch.unsqueeze(new_tokens, 1).unsqueeze(2)
+                        new_output_logits = torch.gather(output, 2, indices).squeeze(2)
+
+                        # TODO(rprenger) we're copying output_logits every time.  Should pre-allocate
+                        output_logits = torch.cat([output_logits, new_output_logits], 1)
+                        all_generated_indices = torch.cat([all_generated_indices, indices[:, :, 0]], 1)
+                        if all_probs:
+                            full_logits = torch.cat([full_logits, output], 1)
+
+                src = parallel_state.get_pipeline_model_parallel_last_rank()
+                group = parallel_state.get_embedding_group()
+                torch.distributed.broadcast(new_tokens, src, group)
+
+                #                done_token = (prev == eod_id).byte() & started.byte()
+                done_token = inference_strategy.end_of_generation_condition(
+                    tokens[:, : context_length + 1], prev, eod_id, end_strings
+                )
+                done_token = done_token.byte() & started.byte()
+
+                just_finished = (done_token & ~is_done).bool()
+                lengths[just_finished.view(-1)] = context_length
+                is_done = is_done | done_token
+
+                done = torch.all(is_done)
+                src = parallel_state.get_pipeline_model_parallel_last_rank()
+                group = parallel_state.get_pipeline_model_parallel_group()
+                torch.distributed.broadcast(done, src, group)
+                if compute_logprob:
+                    if all_probs:
+                        yield tokens, lengths, output_logits, full_logits, audio_feat_lens
+                    else:
+                        yield tokens, lengths, output_logits, None, audio_feat_lens
+                else:
+                    yield tokens, lengths, None, None, audio_feat_lens
+
+            else:
+                if parallel_state.is_pipeline_first_stage():
+                    src = parallel_state.get_pipeline_model_parallel_last_rank()
+                    group = parallel_state.get_embedding_group()
+                    new_tokens = torch.empty_like(tokens[:, context_length])
+                    torch.distributed.broadcast(new_tokens, src, group)
+                    tokens[:, context_length] = new_tokens
+                    yield tokens, None, None, None, audio_feat_lens
+                else:
+                    yield None, None, None, None, audio_feat_lens
+
+                done = torch.cuda.ByteTensor([0])
+                src = parallel_state.get_pipeline_model_parallel_last_rank()
+                group = parallel_state.get_pipeline_model_parallel_group()
+                torch.distributed.broadcast(done, src, group)
+
+            context_length += 1
+            counter += 1
+            if done:
+                break
+
+
 def safe_decode(tokenizer, token_ids, skip_special_tokens=False):
     """安全地解码 token_ids，处理 ignore_index (-100)"""
     # 过滤掉 ignore_index
     valid_token_ids = [token_id for token_id in token_ids if token_id != -100]
-    
+
     # 使用 skip_special_tokens 处理其他特殊标记
     return tokenizer.decode(valid_token_ids, skip_special_tokens=skip_special_tokens)

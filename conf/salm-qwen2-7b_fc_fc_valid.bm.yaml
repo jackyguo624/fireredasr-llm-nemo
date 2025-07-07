@@ -3,7 +3,7 @@ name: megatron_audio_gpt_peft
 ############ Data ############
 data:
   common:
-    global_batch_size: 8
+    global_batch_size: 1
     micro_batch_size: 1
     max_seq_length: 4096
     min_seq_length: 1
@@ -14,8 +14,7 @@ data:
     # data source parts
     cuts_path: 
       # - z_dummy_testset/librispeech/cuts1.jsonl
-      # - export/asr/mandarin/aishell-1/asr/test/lhotse/aishell-1_test_cuts.jsonl
-      - export/asr/mandarin/aishell-1/asr/test/lhotse/aishell-1_test_cuts1.debug2.jsonl 
+      - export/asr/mandarin/aishell-1/asr/test/lhotse/aishell-1_test_cuts.jsonl
 
     max_seq_length: ${data.common.max_seq_length}
     min_seq_length: ${data.common.min_seq_length}
@@ -102,7 +101,7 @@ max_time_per_run: null
 
 trainer:
   # _target_: nemo.lightning.Trainer
-  devices: 8
+  devices: 1
   accelerator: gpu
   num_nodes: 1
   max_epochs: -1
