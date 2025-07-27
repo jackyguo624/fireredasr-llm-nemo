@@ -27,9 +27,9 @@ export HF_TOKEN=${HFTOKEN} && \
 export HF_HOME="/home/heh/.huggingface/" && \
 export HF_HUB_CACHE="/media/data/cache" && \
 export NEMO_MODELS_CACHE="/media/data/pretrained_models/" && \
-python speech_to_text_llm_validate.py \
+python speech_to_text_llm_train.py \
     --config-path="/home/heh/github/NeMo-main/examples/speechlm/conf/salm"  \
-    --config-name "salm-qwen2-7b_fc_fc_valid" \
+    --config-name "salm-qwen2-7b_fc_fc_train" \
     ~data.train_ds \
     data.validation_ds.manifest_filepath=$VAL_MANIFESTS \
     data.train_ds.num_workers=$NUM_WORKERS \
@@ -39,23 +39,29 @@ python speech_to_text_llm_validate.py \
     data.common.micro_batch_size=$MICRO_BATCH \
     ++model.resume_from_path=<path to model checkpoint>
 """
-import sys
-sys.path.append("/hpc_stor01/home/jiaqi.guo/tools/github/NeMo/sequential")
+ 
+# For kaldi wav.ark io
+# ```bash
+# git clone https://github.com/jackyguo624/Sequential.git
+# cd Sequential && pip install .
+# ```
+#
+# from sequential.data.lhotse.audio_backend import KaldiioBackend
+# from lhotse.audio.backend import set_current_audio_backend
+# 
+# set_current_audio_backend(KaldiioBackend())
 
-from sequential.data.lhotse.audio_backend import KaldiioBackend
-from lhotse.audio.backend import set_current_audio_backend
 
-set_current_audio_backend(KaldiioBackend())
-
-
-from fireredasr_llm.collections.speechllm.recipes import speech_to_text_llm_validate
+from fireredasr_llm.collections.speechllm.recipes import speech_to_text_llm_train
 from nemo.core.config import hydra_runner
 
 
-@hydra_runner(config_path="./conf", config_name="salm-qwen2-7b_fc_fc_valid")
+@hydra_runner(config_path="./conf", config_name="salm-qwen2-7b_fc_fc_train")
 def main(cfg):
     """main function for running validation."""
-    return speech_to_text_llm_validate(cfg)
+    if cfg.debug:
+        breakpoint()
+    return speech_to_text_llm_train(cfg)
 
 
 if __name__ == "__main__":
