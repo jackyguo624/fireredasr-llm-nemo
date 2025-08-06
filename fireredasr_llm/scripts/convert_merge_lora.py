@@ -3,25 +3,22 @@ import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import logging
-import subprocess
+import argparse
 
 # Setup basic logging to see the progress
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def merge_and_convert(
+def merge_hf_model(
     llm_dir: str,
     firered_checkpoint_path: str,
     output_dir: str,
-    nemo_repo_path: str
 ):
     """
-    Merges FireRedASR LoRA weights with the base LLM and converts to .nemo format.
+    Merges FireRedASR LoRA weights with the base LLM.
     """
-    
+
     # Ensure output directories exist
-    merged_hf_output_dir = os.path.join(output_dir, "merged_hf_model")
-    nemo_output_file = os.path.join(output_dir, "firered_qwen2_merged.nemo")
-    os.makedirs(merged_hf_output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     # 1. Load the base Qwen2 HuggingFace model.
     # We load it onto the CPU in bfloat16 to manage memory.
@@ -75,48 +72,21 @@ def merge_and_convert(
 
     # 7. Save the merged model in HuggingFace format.
     # This is an intermediate step before NeMo conversion.
-    logging.info(f"Saving merged HuggingFace model to: {merged_hf_output_dir}")
-    model.save_pretrained(merged_hf_output_dir)
-    tokenizer.save_pretrained(merged_hf_output_dir)
-    logging.info(f"Saved tokenizer files to: {merged_hf_output_dir}")
-
-    # 8. Convert the merged HF model to a .nemo checkpoint using the NeMo script.
-    logging.info(f"Converting merged model to .nemo format at: {nemo_output_file}")
-    conversion_script_path = os.path.join(nemo_repo_path, 'scripts/checkpoint_converters/convert_qwen2_hf_to_nemo.py')
-    
-    if not os.path.exists(conversion_script_path):
-        logging.error(f"NeMo conversion script not found at: {conversion_script_path}")
-        return
-
-    # Attempt conversion, trying different tensor parallel sizes if needed.
-    cmd = [
-        'python', conversion_script_path,
-        f'--input_name_or_path {merged_hf_output_dir}',
-        f'--output_path {nemo_output_file}',
-        f'--precision bf16'
-    ]
-    print(' '.join(cmd))
-
-    subprocess.run(cmd, check=True)
-    logging.info(f"Successfully converted model.")
+    logging.info(f"Saving merged HuggingFace model to: {output_dir}")
+    model.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    logging.info(f"Saved tokenizer files to: {output_dir}")
 
 if __name__ == '__main__':
     # --- Configuration ---
-    # Path to the base Qwen2 HuggingFace model directory
-    LLM_DIR = "/hpc_stor01/home/jiaqi.guo/tools/github/FireRedASR/pretrained_models/FireRedASR-LLM-L/Qwen2-7B-Instruct"
-    
-    # Path to the FireRedASR-LLM-L checkpoint file
-    FIRERED_CHECKPOINT = "/hpc_stor01/home/jiaqi.guo/tools/github/FireRedASR/pretrained_models/FireRedASR-LLM-L/model.pth.tar"
-    
-    # Directory to save the output .nemo file and intermediate model
-    OUTPUT_DIR = "./converted_models"
-    
-    # Path to your local NeMo repository checkout
-    NEMO_REPO_PATH = "/hpc_stor01/home/jiaqi.guo/tools/github/NeMo"
-
-    merge_and_convert(
-        llm_dir=LLM_DIR,
-        firered_checkpoint_path=FIRERED_CHECKPOINT,
-        output_dir=OUTPUT_DIR,
-        nemo_repo_path=NEMO_REPO_PATH,
+    argparse = argparse.ArgumentParser(description="Merge FireRedASR LoRA weights with Qwen2.")
+    argparse.add_argument('--llm_dir', type=str, required=True, help='Path to qwen2.5-7b instruct dir')
+    argparse.add_argument('--firered_checkpoint', type=str, required=True, help='Path to the FireRedASR checkpoint')
+    argparse.add_argument('--output_dir', type=str, required=True, help='Directory to save the merged model')
+    args = argparse.parse_args()
+    llm_dir, firered_checkpoint, output_dir = args.llm_dir, args.firered_checkpoint, args.output_dir
+    merge_hf_model(
+        llm_dir=llm_dir,
+        firered_checkpoint_path=firered_checkpoint,
+        output_dir=output_dir,
     ) 

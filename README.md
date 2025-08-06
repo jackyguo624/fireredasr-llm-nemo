@@ -9,14 +9,38 @@ By leveraging NeMo, applying SDTP parallelism and ZeRO-1 optimization enables bo
 ## Setup Nemo docker image according to https://docs.nvidia.com/nemo-framework/user-guide/latest/installation.html
 docker pull nvcr.io/nvidia/nemo:25.04
 
-## git clone fireredasr_llm repo
+## docker run the image according to your `cpus` and `gpus`
+docker run -it --shm-size=1g --rm -w `pwd` --cpus 64 --gpus 8  nvcr.io/nvidia/nemo:25.04 /bin/bash
 
+## git clone fireredasr_llm repo
 git clone https://github.com/jackyguo624/fireredasr-llm-nemo.git && cd fireredasr-llm-nemo
 ```
 
-# Train and validation
+# Prepare the fireredasr-llm model
+```bash
+# download Qwen2-7B-Instruct and FireRedASR-LLM-L from huggingface
+huggingface-cli download Qwen/Qwen2-7B-Instruct --local-dir `pwd`/pretrain_model/Qwen2-7B-Instruct
+huggingface-cli download FireRedTeam/FireRedASR-LLM-L --local-dir `pwd`/pretrain_model/FireRedASR-LLM-L
+
+# merge the lora with llm
+python fireredasr_llm/scripts/convert_merge_lora.py \
+    --llm_dir pretrain_model/Qwen2-7B-Instruct \
+    --firered_checkpoint pretrain_model/FireRedASR-LLM-L/model.pth.tar \
+    --output_dir converted_model/merged_qwen2-7b_instruct
+```
+
+
+# Prepare your train and valid dataset in lhotse format
 ```bash
 # prepare your dataset in lhotse format first， refer to https://lhotse.readthedocs.io/en/latest/index.html
+# Take aishell-1 for example
+lhotse download aishell export/aishell-1/data
+lhotse prepare aishell export/aishell-1/data export/aishell-1
+```
+
+
+# Train and validation
+```bash
 # For finetune
 ./train.sh
 

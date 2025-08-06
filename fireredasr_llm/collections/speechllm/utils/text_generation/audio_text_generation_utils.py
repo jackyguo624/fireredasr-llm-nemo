@@ -152,9 +152,6 @@ def synced_generate(
         )
 
     for tokens, lengths, output_logits, full_logits, audio_feat_lens in batch_token_iterator:
-        # if torch.distributed.get_rank() == 0:
-        #     print("tokens:", safe_decode(tokenizer, tokens[0]))
-        #     breakpoint()
         context_length += 1
     context_length += audio_feat_lens.min().item()
     if parallel_state.is_pipeline_last_stage():
@@ -407,12 +404,7 @@ def sample_sequence_batch(
         maxlen = tokens_to_generate + audio_text_context_lengths.max().item()
         maxlen = inference_strategy.clip_max_len(maxlen)
         lengths = torch.ones([batch_size]).long().cuda() * maxlen
-        # print("maxlen", maxlen)
-        # print("tokens_to_generate", tokens_to_generate)
-        # print("context_extend", context_tokens.size())
-        # print("audio_text_context_lengths", audio_text_context_lengths, "--------------------------------")
-        # print("context_length", context_length)
-        # print("input_embeddings", input_embeddings.size())
+
         while context_length < maxlen:
             batch = inference_strategy.prepare_batch_at_step(
                 tokens,
@@ -477,9 +469,6 @@ def sample_sequence_batch(
 
                 # Insert either new predicted or next prompt token
                 tokens[:, context_length] = new_tokens
-                print(f"tokens: {tokens}")
-                print(f"decode tokens: {safe_decode(tokenizer, tokens[0])}")
-                breakpoint()
 
                 if compute_logprob:
                     if output_logits is None:

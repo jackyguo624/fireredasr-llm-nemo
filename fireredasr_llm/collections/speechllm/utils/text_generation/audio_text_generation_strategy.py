@@ -318,20 +318,6 @@ class SpeechToTextGenerationStrategy(TextGenerationStrategy):
             input_length=context_lengths,
         )
 
-        # read final_embeding from file 
-        # torch from numpy， numpy load from text file
-        # final_embedding = final_embedding[:,:66,:]
-        # embeding_file = 'slam-dump_aishell-1.debug2/outputs_dump_aishell-1.debug2/sample_0_inputs_embeds.1.txt'
-        # import numpy as np
-        # final_embedding_original = final_embedding.clone()
-        # print(f"final_embedding_original.shape: {final_embedding_original.shape}")
-        # final_embedding = torch.from_numpy(np.loadtxt(embeding_file)).to(final_embedding.dtype).to(final_embedding.device).unsqueeze(0)
-        # print(f"final_embedding.shape: {final_embedding.shape}")
-        # # if torch.distributed.get_rank() == 0:
-        #     breakpoint()
-        # torch.distributed.barrier()
-
-
         self.attention_mask = None # self.model._create_attention_mask(final_embedding)
         final_embedding = final_embedding.transpose(0, 1).contiguous()
         self.position_ids = position_ids
@@ -358,9 +344,6 @@ class SpeechToTextGenerationStrategy(TextGenerationStrategy):
         compute_attention_mask: bool,
     ) -> Dict[str, torch.Tensor]:
         """Prepare batch for each of the inference steps"""
-        # if torch.distributed.get_rank() == 0:
-        #     breakpoint()
-        # torch.distributed.barrier()
         if step == 0:
             tokens2use = tokens[:, :curr_context_length-1].contiguous()
             # positions2use = self.position_ids[:, :curr_context_length].contiguous()
