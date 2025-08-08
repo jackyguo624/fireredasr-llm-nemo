@@ -12,17 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, List, Tuple, Union
+from typing import List, Union
 
 import torch.utils.data
-from lhotse.cut import Cut, CutSet
+from lhotse.cut import CutSet
 from lhotse.dataset import AudioSamples
 from lhotse.dataset.collation import collate_vectors as collate_vectors_lhotse
 from transformers import AutoTokenizer
-from nemo.collections.speechlm.data.dataset.data_utils import build_loss_mask
-from nemo.collections.speechlm.data.text_processing import TextProcessorOutput
 from fireredasr_llm.collections.speechllm.data.llm_tokenizer import LlmTokenizerWrapper
-from lightning.pytorch.utilities.rank_zero import rank_zero_only
 
 def collate_vectors(items, max_length: int, padding_value):
     vectors = collate_vectors_lhotse(items, padding_value=padding_value)
@@ -77,9 +74,14 @@ class MultimodalConversationDataset(torch.utils.data.Dataset):
 
         # for cut in all_cuts:
         audio_samples = [
-            torch.tensor(cut.load_audio().reshape(-1), dtype=torch.int16)
+            torch.tensor(cut.load_audio().reshape(-1)) 
             for cut in all_cuts
         ]
+
+        # If the audio is in float32, convert it to int16
+        # This is necessary for compatibility with the FireRedASR model.
+        if torch.all(audio_samples[0]<= 1.0):
+            audio_samples = [audio_signal * 2**15 for audio_signal in audio_samples]
 
         audio_length = [len(audio_signal) for audio_signal in audio_samples]
 

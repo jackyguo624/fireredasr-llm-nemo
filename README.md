@@ -23,9 +23,9 @@ huggingface-cli download Qwen/Qwen2-7B-Instruct --local-dir `pwd`/pretrain_model
 huggingface-cli download FireRedTeam/FireRedASR-LLM-L --local-dir `pwd`/pretrain_model/FireRedASR-LLM-L
 
 # merge the lora with llm
-python fireredasr_llm/scripts/convert_merge_lora.py \
-    --llm_dir pretrain_model/Qwen2-7B-Instruct \
-    --firered_checkpoint pretrain_model/FireRedASR-LLM-L/model.pth.tar \
+python fireredasr_llm/scripts/merge_firered_lora.py \
+    --llm_dir pretrain_model/Qwen2-7B-Instruct  \
+    --firered_checkpoint pretrain_model/FireRedASR-LLM-L/model.pth.tar  \
     --output_dir converted_model/merged_qwen2-7b_instruct
 ```
 
@@ -34,19 +34,25 @@ python fireredasr_llm/scripts/convert_merge_lora.py \
 ```bash
 # prepare your dataset in lhotse format first， refer to https://lhotse.readthedocs.io/en/latest/index.html
 # Take aishell-1 for example
-lhotse download aishell export/aishell-1/data
-lhotse prepare aishell export/aishell-1/data export/aishell-1
+lhotse download aishell export
+lhotse prepare aishell export/aishell export/aishell
+
+# Convert to Cuts
+for f in train dev test; do
+python fireredasr_llm/scripts/prepare_lhotse_cuts.py \
+    -r export/aishell/aishell_recordings_${f}.jsonl.gz \
+    -s export/aishell/aishell_supervisions_${f}.jsonl.gz \
+    -o export/aishell/aishell_cuts_${f}.jsonl.gz
 ```
 
 
 # Train and validation
 ```bash
 # For finetune
-./train.sh
+python fireredasr_llm/train.py 
 
 # For validation
-./valid.sh
-
+python fireredasr_llm/validate.py
 ```
 
 

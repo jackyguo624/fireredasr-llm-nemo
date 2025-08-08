@@ -4,7 +4,7 @@ name: megatron_audio_gpt_firered_peft
 ############ Data ############
 data:
   common:
-    global_batch_size: 96
+    global_batch_size: 48
     micro_batch_size: 1
     max_seq_length: 4096
     min_seq_length: 1
@@ -12,7 +12,8 @@ data:
     tokens_to_generate: 128
 
   train_ds:
-    cuts_path: export/asr/mandarin/aishell-1/asr/train/lhotse/aishell-1_train_cuts.jsonl
+    cuts_path: export/aishell/aishell_cuts_train.jsonl.gz
+
     max_seq_length: ${data.common.max_seq_length}
     min_seq_length: ${data.common.min_seq_length}
     tokens_to_generate: ${data.common.tokens_to_generate} # 0 for no tokens to generate
@@ -62,7 +63,8 @@ data:
   validation_ds:
     # data source parts
     cuts_path:
-      - export/asr/mandarin/aishell-1/asr/dev/lhotse/aishell-1_dev_cuts.jsonl
+      - export/aishell/aishell_cuts_dev.jsonl.gz
+
     max_seq_length: ${data.common.max_seq_length}
     min_seq_length: ${data.common.min_seq_length}
     tokens_to_generate: ${data.common.tokens_to_generate}
@@ -97,16 +99,18 @@ model:
   freeze_modality_adapter: false
 
   llm:
-    pretrained_model: /hpc_stor01/home/jiaqi.guo/tools/github/NeMo/converted_models/merged_hf_model
+    pretrained_model: converted_model/merged_qwen2-7b_instruct
     _target_: nemo.collections.llm.Qwen2Model
     config:
       _target_: nemo.collections.llm.Qwen25Config7B
       use_cpu_initialization: true
       bf16: true
 
+
   speech_encoder:
     _target_: fireredasr_llm.collections.speechllm.modules.encoder.FireRedConformerEncoder
-    init_from_ptl_ckpt: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/model.pth.tar
+    init_from_ptl_ckpt: pretrain_model/FireRedASR-LLM-L/model.pth.tar
+
     config:
       idim: 80
       n_layers: 16
@@ -120,11 +124,11 @@ model:
     sample_rate: ${data.common.sample_rate}
     preprocessor_config:
       _target_: fireredasr_llm.collections.speechllm.modules.preprocessor.FireRedPreprocessor
-      kaldi_cmvn_file: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/cmvn.ark
+      kaldi_cmvn_file: pretrain_model/FireRedASR-LLM-L/cmvn.ark
 
   modality_adapter:
     _target_: fireredasr_llm.collections.speechllm.modules.adapter.Adapter
-    init_from_ptl_ckpt: /hpc_stor01/home/jiaqi.guo/.cache/huggingface/hub/models--FireRedTeam--FireRedASR-LLM-L/model.pth.tar
+    init_from_ptl_ckpt: pretrain_model/FireRedASR-LLM-L/model.pth.tar
     config:
       encoder_dim: 1280
       llm_dim: 3584
@@ -137,7 +141,9 @@ model:
     target_modules:
       - "linear_qkv"
       - "linear_proj"
-
+  
+  inference_config:
+    beam_size: 3
 
 
 ############ Optimizer ############
@@ -213,7 +219,7 @@ resume:
   resume_from_directory: null
   resume_from_path: null
   adapter_path: null
-  resume_if_exists: false
+  resume_if_exists: true
   resume_past_end: false
   resume_ignore_no_checkpoint: true
 
@@ -223,11 +229,6 @@ logger:
   _target_: nemo.lightning.NeMoLogger
   log_dir: null  # default to ./nemo_experiments
   name: ${name}
-  # wandb:
-  #   _target_: lightning.pytorch.loggers.WandbLogger
-  #   project: null
-  #   name: ${logger.name}
-  #   resume: false
 
 
 debug: False

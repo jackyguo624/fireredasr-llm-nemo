@@ -52,6 +52,11 @@ def build_components(cfg: DictConfig, tokenizer: Optional[AutoTokenizer] = None)
     cfg = OmegaConf.to_container(cfg, resolve=True)
 
     logging.info(f'Hydra config: {OmegaConf.to_yaml(cfg)}')
+    
+    if Path(cfg['model']['llm']['pretrained_model']).exists():
+        # if the pretrained model is a local path, resolve it to absolute path
+        # this is to prevent loading from huggingface repo
+        cfg['model']['llm']['pretrained_model'] = str(Path(cfg['model']['llm']['pretrained_model']).resolve())
 
     # 1. build the model
     logging.info(f"Using tokenizer from pretrained model: {cfg['model']['llm']['pretrained_model']}")
@@ -157,7 +162,6 @@ def speech_to_text_llm_validate(cfg: DictConfig, tokenizer: Optional[AutoTokeniz
     NOTE: Can use dummy groundtruth (e.g., answer='-') for inference
     when speech_to_text_llm_generate is not implemented yet.
     """
-
     components = build_components(cfg, tokenizer)
 
     # 7. run the inference

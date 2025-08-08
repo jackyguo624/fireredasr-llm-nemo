@@ -4,6 +4,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import logging
 import argparse
+import subprocess
 
 # Setup basic logging to see the progress
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -76,6 +77,7 @@ def merge_hf_model(
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
     logging.info(f"Saved tokenizer files to: {output_dir}")
+
 
 if __name__ == '__main__':
     # --- Configuration ---
