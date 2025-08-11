@@ -1,0 +1,10 @@
+162,165c162,165
+<                 # if not new_run_dir.exists():
+<                 #     new_run_dir.mkdir()
+<                 #     for _file in files_to_move:
+<                 #         shutil.move(str(_file), str(new_run_dir))
+---
+>                 if not new_run_dir.exists():
+>                     new_run_dir.mkdir()
+>                     for _file in files_to_move:
+>                         shutil.move(str(_file), str(new_run_dir))
