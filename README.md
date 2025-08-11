@@ -14,6 +14,9 @@ docker run -it --shm-size=1g --rm -w `pwd` --cpus 64 --gpus 8  nvcr.io/nvidia/ne
 
 ## git clone fireredasr_llm repo
 git clone https://github.com/jackyguo624/fireredasr-llm-nemo.git && cd fireredasr-llm-nemo
+
+## install requirements
+pip install -r requirements.txt
 ```
 
 # Prepare the fireredasr-llm model
