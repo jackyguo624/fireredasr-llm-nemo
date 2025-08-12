@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 ## make the patch
 patch /opt/NeMo/nemo/lightning/pytorch/callbacks/model_checkpoint.py patch/model_checkpoint.patch
-patch /opt/NeMo/nemo/lightning/io/to_config.py patch/to_config.path
+patch /opt/NeMo/nemo/lightning/io/to_config.py patch/to_config.patch
 ```
 
 # Prepare the fireredasr-llm model
