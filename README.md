@@ -19,8 +19,8 @@ git clone https://github.com/jackyguo624/fireredasr-llm-nemo.git && cd fireredas
 pip install -r requirements.txt
 
 ## make the patch
-patch /opt/NeMo/nemo/lightning/pytorch/callbacks/model_checkpoint.py model_checkpoint.patch
-path /opt/NeMo/nemo/lightning/io/to_config.py to_config.path
+patch /opt/NeMo/nemo/lightning/pytorch/callbacks/model_checkpoint.py patch/model_checkpoint.patch
+patch /opt/NeMo/nemo/lightning/io/to_config.py patch/to_config.path
 ```
 
 # Prepare the fireredasr-llm model
