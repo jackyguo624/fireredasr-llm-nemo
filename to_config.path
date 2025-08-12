@@ -1,0 +1,16 @@
+19d18
+< from omegaconf import ListConfig, DictConfig  # Added to handle OmegaConf containers
+125,137d123
+< 
+< 
+< @to_config.register_class(ListConfig)
+< def handle_list_config(value: ListConfig):
+<     """Convert OmegaConf ListConfig into a regular Python list for serialization."""
+<     # Recursively convert nested elements if they are also ListConfig or DictConfig
+<     return [handle_list_config(v) if isinstance(v, ListConfig) else handle_dict_config(v) if isinstance(v, DictConfig) else v for v in value]
+< 
+< 
+< @to_config.register_class(DictConfig)
+< def handle_dict_config(value: DictConfig):
+<     """Convert OmegaConf DictConfig into a regular Python dict for serialization."""
+<     return {k: handle_list_config(v) if isinstance(v, ListConfig) else handle_dict_config(v) if isinstance(v, DictConfig) else v for k, v in value.items()}
