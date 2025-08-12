@@ -62,4 +62,27 @@ python fireredasr_llm/train.py
 python fireredasr_llm/validate.py
 ```
 
+# Check the result
+```bash
+# convert json to text
+python fireredasr_llm/scripts/json2txt.py speechlm_pred_val_wer_aishell_cuts_test_inputs_preds_labels.jsonl
+
+# compute wer
+python fireredasr_llm/scripts/compute-wer.py \
+    --char=1 \
+    -v=1 \
+    speechlm_pred_val_wer_aishell_cuts_test_inputs_preds_labels.gt \
+    speechlm_pred_val_wer_aishell_cuts_test_inputs_preds_labels.pred > aishell1.wer
+
+tail -8 aishell1.wer
+# ===========================================================================
+# 
+# Overall -> 0.73 % N=104765 C=104060 S=633 D=72 I=63
+# Mandarin -> 0.73 % N=104762 C=104057 S=633 D=72 I=63
+# English -> 0.00 % N=3 C=3 S=0 D=0 I=0
+#
+# ===========================================================================
+```
+
+
 
